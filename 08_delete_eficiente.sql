@@ -1,7 +1,7 @@
 -- 08_delete_eficiente.sql
 
-CREATE DATABASE db1410_eficiente;
-GO
+--CREATE DATABASE db1410_eficiente;
+--GO
 
 USE db1410_eficiente;
 GO
@@ -39,5 +39,64 @@ FROM master.dbo.spt_values a , master.dbo.spt_values b;
 
 -- Truncate remove todas as linhas da tabela, ele é mais eficiente
 -- que o delete pois não registra a remoção das linhas
-TRUNCATE TABLE clientes;
+-- TRUNCATE TABLE clientes;
 
+INSERT INTO pedidos (pedido_id, cliente_id, data_pedido, valor_total)
+SELECT TOP 100000
+	ROW_NUMBER() OVER( ORDER BY (SELECT NULL)),
+	(ABS(CHECKSUM(NEWID())) % 100000) + 1,
+	DATEADD(
+		DAY, 
+		-(ROW_NUMBER() OVER( ORDER BY (SELECT NULL)) % 3650),
+		GETDATE()
+	),
+	CAST(RAND() * 1000 AS DECIMAL(10,2))
+FROM master.dbo.spt_values a, master.dbo.spt_values b;
+
+-- para ver os 10 primeiros registros de cada tabela
+SELECT TOP 10 * FROM clientes
+SELECT TOP 10 * FROM pedidos
+
+-- para ver a quantidade de registros em cada tabela
+SELECT COUNT(*) AS Quantidade FROM clientes
+SELECT COUNT(*) AS Quantidade FROM pedidos
+
+BEGIN TRY 
+	BEGIN TRANSACTION
+	-- declarando as variaveis de controle do lote
+		DECLARE @batch_size INT = 1000;
+		DECLARE @row_count INT;
+
+		-- inicializando a variavel de controle da contagem de
+		-- registros exclusivos
+		SET @row_count = 1
+
+		-- looping para excluir os dados em lote
+		WHILE @row_count > 0 
+			BEGIN
+				-- Excluir os dados em lotes de 1000
+				DELETE TOP (@batch_size)
+				FROM clientes
+				WHERE data_cadastro < DATEADD(YEAR, -5, GETDATE());
+
+				-- obtendo a contagem de registros na iteração atual
+				SET @row_count = @@ROWCOUNT;
+
+				-- exibindo o progresso
+				PRINT 'Excluidos' + 
+				CAST(@row_count AS VARCHAR) + 
+				' registros de clientes'
+
+				-- esperar 1 segundo entre lotes, visando evitar blocks
+				-- por parte do servidor
+				WAITFOR DELAY '00:00:01';
+			END
+	COMMIT TRANSACTION
+END TRY
+BEGIN CATCH
+	IF  @@TRANCOUNT > 0 
+	BEGIN
+		ROLLBACK TRANSACTION;
+	END
+	PRINT 'Erro durante a exclusão:' + ERROR_MESSAGE();
+END CATCH;
